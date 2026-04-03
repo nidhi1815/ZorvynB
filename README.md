@@ -460,7 +460,10 @@ zorvyn/backend/
 ### Backend Setup
 
 ```bash
-cd zorvyn/backend
+#clone the repo
+git clonr https://github.com/nidhi1815/ZorvynB.git
+
+cd ZorvynB/backend
 npm install
 
 # Create .env file with required variables
