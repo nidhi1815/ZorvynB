@@ -461,7 +461,7 @@ zorvyn/backend/
 
 ```bash
 #clone the repo
-git clonr https://github.com/nidhi1815/ZorvynB.git
+git clone https://github.com/nidhi1815/ZorvynB.git
 
 cd ZorvynB/backend
 npm install
