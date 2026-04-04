@@ -63,14 +63,6 @@ The API is built on Express.js with Prisma ORM, JWT-based authentication, role-b
 | Validation | Zod | Schema-based input validation with clear error messages |
 | Environment | dotenv | Keeps secrets out of source code |
 
-### Why PostgreSQL(relational) over MongoDB(non relational)
-
-Financial data is structured, relational, and requires exact aggregations. PostgreSQL gives:
-- Native `SUM`, `GROUP BY`, `AVG` — trivial dashboard queries
-- ACID transactions — no partial writes (critical for financial integrity)
-- Foreign key constraints — data cannot become orphaned or inconsistent
-- JOINs — users linked to transactions cleanly
-
 ---
 
 ## 3. High Level Design
@@ -177,28 +169,23 @@ req.user = { userId, role } attached to request object
         ▼
 Controller executes with authenticated context
 ```
-
-**401 vs 403 — not the same:**
-- `401 Unauthorized` — "I don't know who you are" (missing or invalid token)
-- `403 Forbidden` — "I know who you are but you're not allowed here" (wrong role)
-
 ---
 
 ### 4.2 Role Based Access Control
 
 | Action | Viewer | Analyst | Admin |
 |---|:---:|:---:|:---:|
-| View own transactions | ✅ | ✅ | ✅ |
-| View all transactions | ❌ | ✅ | ✅ |
-| Create transaction | ❌ | ❌ | ✅ |
-| Update transaction | ❌ | ❌ | ✅ |
-| Delete transaction | ❌ | ❌ | ✅ |
+| View own transactions | yes | yes | yes |
+| View all transactions | no | yes | yes |
+| Create transaction | no | no | yes |
+| Update transaction | no | no | yes |
+| Delete transaction | no | no | yes |
 | View dashboard summary | own only | all records | all records |
-| View category trends | ❌ | ✅ | ✅ |
-| View monthly charts | ❌ | ✅ | ✅ |
-| Create users | ❌ | ❌ | ✅ |
-| Manage user roles | ❌ | ❌ | ✅ |
-| Deactivate users | ❌ | ❌ | ✅ |
+| View category trends | no | yes | yes |
+| View monthly charts | no | yes | yes |
+| Create users | no | no | yes |
+| Manage user roles | no | no | yes |
+| Deactivate users | no | no | yes |
 
 **Row-level filtering for Viewers:**
 When a Viewer calls `GET /api/records`, the service layer automatically adds `WHERE userId = req.user.userId` to the query. Viewers physically cannot retrieve another user's records — access control is enforced at the database query level, not in the API response.
@@ -308,85 +295,6 @@ users (1) ──────────────── (many) transactions
 
 > Complete testing guide with all test cases, request/response examples, and status codes available in [API_TESTING_GUIDE.md](./API_TESTING_GUIDE.md)
 
-### Auth
-
-| Method | Endpoint | Access | Auth | Status Codes | Description |
-|---|---|---|---|---|---|
-| POST | `/api/auth/login` | Public | None | 200, 400, 401 | Login with credentials, returns JWT token with role |
-| POST | `/api/auth/register` | Admin only | Bearer token | 201, 400, 401, 403 | Create new user (Admin role required) |
-
-### Users
-
-| Method | Endpoint | Access | Auth | Status Codes | Description |
-|---|---|---|---|---|---|
-| GET | `/api/users` | Admin | Bearer token | 200, 401, 403 | List all users in system |
-| GET | `/api/users/:id` | Admin | Bearer token | 200, 401, 403, 404 | Get single user by ID |
-| PATCH | `/api/users/:id` | Admin | Bearer token | 200, 400, 401, 403, 404 | Update user role or isActive status |
-| DELETE | `/api/users/:id` | Admin | Bearer token | 200, 401, 403, 404 | Soft-deactivate user (sets isActive = false) |
-
-**Update payloads:**
-```json
-{"role": "VIEWER"}
-{"isActive": false}
-```
-
-### Financial Records
-
-| Method | Endpoint | Access | Auth | Status Codes | Description |
-|---|---|---|---|---|---|
-| POST | `/api/records` | Admin | Bearer token | 201, 400, 401, 403 | Create new transaction record |
-| GET | `/api/records` | All roles | Bearer token | 200, 401 | Get records (Viewer: own only, Analyst/Admin: all) |
-| GET | `/api/records/:id` | All roles | Bearer token | 200, 401, 403, 404 | Get single record with ownership check |
-| PATCH | `/api/records/:id` | Admin | Bearer token | 200, 400, 401, 403, 404 | Update transaction record |
-| DELETE | `/api/records/:id` | Admin | Bearer token | 200, 401, 403, 404 | Soft-delete record (isDeleted = true) |
-
-**Create/Update request body:**
-```json
-{
-  "amount": 75000,
-  "type": "INCOME",
-  "category": "Consulting",
-  "date": "2026-04-01",
-  "description": "Optional notes"
-}
-```
-
-**Filtering on GET /api/records (optional, chainable):**
-```
-?type=INCOME
-?type=EXPENSE
-?category=Salary
-?startDate=2026-01-01&endDate=2026-03-31
-?type=INCOME&category=Consulting
-```
-
-**Validation rules:**
-- `amount`: Positive number (> 0), required
-- `type`: INCOME or EXPENSE enum, required
-- `category`: Non-empty string, required
-- `date`: Valid YYYY-MM-DD format, required
-- `description`: Optional string
-
-**Row-Level Security:** Viewers see only own records (WHERE userId = req.user.userId enforced at database query level)
-
-### Dashboard
-
-| Method | Endpoint | Access | Auth | Status Codes | Description |
-|---|---|---|---|---|---|
-| GET | `/api/dashboard/summary` | All roles | Bearer token | 200, 401 | Total income, expense, net balance (role-filtered data) |
-| GET | `/api/dashboard/by-category` | Analyst, Admin | Bearer token | 200, 401, 403 | Totals grouped by category (blocked for Viewers) |
-| GET | `/api/dashboard/monthly-trend` | Analyst, Admin | Bearer token | 200, 401, 403 | Income vs expense trends by month (raw SQL with TO_CHAR) |
-| GET | `/api/dashboard/recent` | All roles | Bearer token | 200, 400, 401 | Last N transactions (default 10, max 100) |
-
-
-**Recent transactions with optional limit:**
-```
-GET /api/dashboard/recent
-GET /api/dashboard/recent?limit=5
-GET /api/dashboard/recent?limit=3
-```
-
-**Role-based behavior:**
 - Summary: Viewer sees own totals, Analyst/Admin see system-wide totals
 - Category/Monthly: Analyst/Admin only (Viewer returns 403)
 - Recent: Viewer sees own recent, Analyst/Admin see system-wide recent
